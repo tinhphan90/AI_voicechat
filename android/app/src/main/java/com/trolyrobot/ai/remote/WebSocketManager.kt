@@ -30,8 +30,8 @@ class WebSocketManager(
 ) {
     private var client: OkHttpClient = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
-        .connectTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(60, TimeUnit.SECONDS) // Render free tier có thể mất 30-60s để "thức dậy" sau khi ngủ
         .pingInterval(15, TimeUnit.SECONDS)
         .build()
 
@@ -45,8 +45,9 @@ class WebSocketManager(
 
     companion object {
         private const val TAG = "WebSocketManager"
-        private const val MAX_RETRIES = 5
+        private const val MAX_RETRIES = 8
         private const val INITIAL_BACKOFF_MS = 1000L
+        private const val MAX_BACKOFF_MS = 15000L
     }
 
     fun connect(serverUrl: String) {
@@ -107,7 +108,7 @@ class WebSocketManager(
             return
         }
 
-        val backoffMs = INITIAL_BACKOFF_MS * (1 shl retryCount)
+        val backoffMs = (INITIAL_BACKOFF_MS * (1 shl retryCount)).coerceAtMost(MAX_BACKOFF_MS)
         retryCount++
         Log.d(TAG, "Scheduling WebSocket reconnect attempt #$retryCount in ${backoffMs}ms...")
 

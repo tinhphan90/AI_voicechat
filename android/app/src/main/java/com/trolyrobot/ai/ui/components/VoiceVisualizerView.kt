@@ -52,6 +52,8 @@ import com.trolyrobot.ai.ui.theme.Slate800
 import com.trolyrobot.ai.ui.theme.Slate900
 import kotlin.math.sin
 
+private const val USER_SPEAKING_THRESHOLD = 0.08f
+
 @Composable
 fun VoiceVisualizerView(
     connectionState: ConnectionState,
@@ -176,7 +178,7 @@ fun VoiceVisualizerView(
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
                         )
-                    } else if (isRecording) {
+                    } else if (isRecording && userVolume > USER_SPEAKING_THRESHOLD) {
                         Icon(
                             imageVector = Icons.Default.Mic,
                             contentDescription = "User Speaking",
@@ -188,6 +190,19 @@ fun VoiceVisualizerView(
                             color = Emerald400,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
+                        )
+                    } else if (isRecording) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "Listening",
+                            tint = Slate200,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Text(
+                            text = "ĐANG NGHE...",
+                            color = Slate200,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Medium
                         )
                     } else {
                         Icon(

@@ -164,8 +164,6 @@ export default function App() {
   const reconnectTimeoutRef = useRef<number | null>(null);
   const userSpeakingTimeoutRef = useRef<number | null>(null);
   const currentAiMsgIdRef = useRef<string | null>(null);
-  const isAiSpeakingRef = useRef<boolean>(false);
-  const lastAiSpeakingTimeRef = useRef<number>(0);
 
   // 1. Check Server Health / API Key status
   useEffect(() => {
@@ -184,12 +182,7 @@ export default function App() {
   useEffect(() => {
     const player = new AudioPlayer((volume) => {
       setAiVolume(volume);
-      const active = volume > 0.05 || player.getIsPlaying();
-      setIsAiSpeaking(active);
-      isAiSpeakingRef.current = active;
-      if (active) {
-        lastAiSpeakingTimeRef.current = Date.now();
-      }
+      setIsAiSpeaking(volume > 0.08);
     });
     playerRef.current = player;
 
@@ -291,7 +284,6 @@ export default function App() {
           // Stop audio playback immediately on interrupt
           playerRef.current?.stop();
           setIsAiSpeaking(false);
-          isAiSpeakingRef.current = false;
           if (currentAiMsgIdRef.current) {
             setMessages((prev) =>
               prev.map((m) =>
@@ -301,10 +293,6 @@ export default function App() {
             currentAiMsgIdRef.current = null;
           }
         } else if (msg.type === "turn_complete") {
-          if (!playerRef.current?.getIsPlaying()) {
-            setIsAiSpeaking(false);
-            isAiSpeakingRef.current = false;
-          }
           if (currentAiMsgIdRef.current) {
             setMessages((prev) =>
               prev.map((m) =>
@@ -384,61 +372,31 @@ export default function App() {
       // Start recording
       try {
         setMicErrorMessage(null);
-        const INTERRUPT_THRESHOLD = 0.28; // Require clear user voice override to trigger interruption during AI audio playback
-
         const recorder = new AudioRecorder(
-          (base64Pcm, volume) => {
-            const isAiActive = isAiSpeakingRef.current || playerRef.current?.getIsPlaying();
-            const isRecentEchoTail = Date.now() - lastAiSpeakingTimeRef.current < 300;
-
-            if (isAiActive || isRecentEchoTail) {
-              // AI is currently speaking or sound is reverberating from speaker
-              if (volume >= INTERRUPT_THRESHOLD) {
-                // User intentionally spoke loudly to interrupt the AI
-                console.log("[App] Explicit user interrupt detected. Stopping AI playback.");
-                playerRef.current?.stop();
-                setIsAiSpeaking(false);
-                isAiSpeakingRef.current = false;
-
-                if (wsRef.current?.readyState === WebSocket.OPEN) {
-                  wsRef.current.send(JSON.stringify({ type: "interrupt" }));
-                  wsRef.current.send(
-                    JSON.stringify({
-                      type: "audio",
-                      data: base64Pcm,
-                      mimeType: "audio/pcm;rate=16000",
-                    })
-                  );
-                }
-              } else {
-                // Low/medium volume = acoustic feedback from speaker to mic -> DUCK/SUPPRESS from sending to Gemini Live API
-                return;
-              }
-            } else {
-              // Normal state: AI is silent
-              if (wsRef.current?.readyState === WebSocket.OPEN) {
-                wsRef.current.send(
-                  JSON.stringify({
-                    type: "audio",
-                    data: base64Pcm,
-                    mimeType: "audio/pcm;rate=16000",
-                  })
-                );
-                setStats((prev) => ({
-                  ...prev,
-                  audioChunksSent: prev.audioChunksSent + 1,
-                }));
-              }
+          (base64Pcm) => {
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(
+                JSON.stringify({
+                  type: "audio",
+                  data: base64Pcm,
+                  mimeType: "audio/pcm;rate=16000",
+                })
+              );
+              setStats((prev) => ({
+                ...prev,
+                audioChunksSent: prev.audioChunksSent + 1,
+              }));
             }
           },
           (volume) => {
             setUserVolume(volume);
-            const isAiActive = isAiSpeakingRef.current || playerRef.current?.getIsPlaying();
-            if (isAiActive) {
-              setIsUserSpeaking(volume >= INTERRUPT_THRESHOLD);
-            } else {
-              setIsUserSpeaking(volume > 0.08);
-            }
+            // Chỉ cập nhật UI (waveform). KHÔNG tự ý gọi interrupt ở đây:
+            // Gemini Live API đã có VAD phía server để phát hiện người dùng
+            // ngắt lời thật sự (xem message.serverContent?.interrupted trong
+            // server.ts). Nếu tự gọi interrupt dựa trên âm lượng mic thô,
+            // tiếng AI phát ra loa bị mic thu lại (echo) sẽ liên tục bị hiểu
+            // nhầm là người dùng đang nói -> gây vòng lặp giật/ngưng audio.
+            setIsUserSpeaking(volume > 0.08);
           }
         );
 

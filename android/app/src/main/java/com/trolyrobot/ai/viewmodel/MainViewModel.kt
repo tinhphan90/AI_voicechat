@@ -1,6 +1,8 @@
 package com.trolyrobot.ai.viewmodel
 
 import android.app.Application
+import android.content.Context
+import android.media.AudioManager
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -25,6 +27,9 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 class MainViewModel(application: Application) : AndroidViewModel(application), WebSocketListenerCallback {
+
+    private val audioManager: AudioManager =
+        application.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     // Connection State
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -154,6 +159,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application), W
     }
 
     fun startMicrophone() {
+        // Kích hoạt chế độ âm thanh "voice communication" của hệ thống để bật toàn bộ
+        // pipeline AEC/AGC/NoiseSuppression phần cứng của máy (giống cách các app gọi
+        // thoại/video call làm) — giúp khử tiếng AI phát ra loa bị mic thu lại.
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        audioManager.isSpeakerphoneOn = true // vẫn phát qua loa ngoài, không chuyển sang loa thoại nhỏ
+
         val success = audioRecorderManager.startRecording(viewModelScope)
         _isRecording.value = success
     }
@@ -162,6 +173,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application), W
         audioRecorderManager.stopRecording()
         _isRecording.value = false
         _userVolume.value = 0f
+        audioManager.mode = AudioManager.MODE_NORMAL
     }
 
     fun sendTextMessage(text: String) {
@@ -272,5 +284,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application), W
         audioRecorderManager.stopRecording()
         audioPlayer.release()
         webSocketManager.disconnect()
+        audioManager.mode = AudioManager.MODE_NORMAL
     }
 }

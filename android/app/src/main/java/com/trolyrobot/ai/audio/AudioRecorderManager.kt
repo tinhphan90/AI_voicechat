@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -25,6 +27,8 @@ class AudioRecorderManager(
     private var audioRecord: AudioRecord? = null
     private var recordingJob: Job? = null
     private var isRecording = false
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
 
     companion object {
         private const val TAG = "AudioRecorderManager"
@@ -44,7 +48,7 @@ class AudioRecorderManager(
             val bufferSize = Math.max(minBufferSize, 4096 * 2)
 
             audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION, // Bật AEC pipeline của Android (khử tiếng vọng loa->mic)
                 SAMPLE_RATE,
                 CHANNEL_CONFIG,
                 AUDIO_FORMAT,
@@ -55,6 +59,20 @@ class AudioRecorderManager(
                 Log.e(TAG, "AudioRecord initialization failed.")
                 stopRecording()
                 return false
+            }
+
+            // Gắn thêm bộ khử tiếng vọng & khử tạp âm phần cứng/phần mềm nếu thiết bị hỗ trợ.
+            // Đây là lớp bảo vệ bổ sung bên cạnh VOICE_COMMUNICATION source ở trên, giúp giảm
+            // tối đa việc mic thu lại tiếng AI phát ra loa rồi gửi ngược lên server -> gây
+            // Gemini tự hiểu nhầm là người dùng đang ngắt lời -> lặp/giật audio.
+            val sessionId = audioRecord?.audioSessionId ?: 0
+            if (sessionId != 0) {
+                if (AcousticEchoCanceler.isAvailable()) {
+                    echoCanceler = AcousticEchoCanceler.create(sessionId)?.apply { enabled = true }
+                }
+                if (NoiseSuppressor.isAvailable()) {
+                    noiseSuppressor = NoiseSuppressor.create(sessionId)?.apply { enabled = true }
+                }
             }
 
             audioRecord?.startRecording()
@@ -109,6 +127,16 @@ class AudioRecorderManager(
         isRecording = false
         recordingJob?.cancel()
         recordingJob = null
+
+        try {
+            echoCanceler?.release()
+            noiseSuppressor?.release()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing audio effects", e)
+        } finally {
+            echoCanceler = null
+            noiseSuppressor = null
+        }
 
         try {
             audioRecord?.stop()
