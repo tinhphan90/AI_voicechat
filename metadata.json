@@ -1,0 +1,10 @@
+{
+  "name": "AI Realtime Voice & Text Chat",
+  "description": "Ứng dụng trò chuyện 2 chiều thời gian thực với AI qua WebSockets và Gemini Live API với độ trễ cực thấp.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
