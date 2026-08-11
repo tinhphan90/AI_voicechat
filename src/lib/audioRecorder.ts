@@ -1,6 +1,7 @@
 /**
  * Microphone Audio Recorder for Gemini Live API
- * Captures 16kHz 16-bit PCM Mono audio from microphone and encodes to Base64 chunks
+ * Cross-platform support for iOS (Safari, Chrome iOS) & Android (Chrome, WebViews, Edge)
+ * Captures 16kHz 16-bit PCM Mono audio from microphone with automatic resampling and error diagnostics.
  */
 
 export class AudioRecorder {
@@ -24,7 +25,14 @@ export class AudioRecorder {
   public async start(): Promise<void> {
     if (this.isRecording) return;
 
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error(
+        "TRINHDRUYET_KHONG_HO_TRO: Trình duyệt của bạn không hỗ trợ truy cập Micro. Vui lòng mở bằng Safari hoặc Chrome phiên bản mới nhất."
+      );
+    }
+
     try {
+      // 1. Request microphone stream with echo cancellation and noise suppression
       this.mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -34,14 +42,33 @@ export class AudioRecorder {
         },
       });
 
-      // Target 16kHz for Gemini Live API
+      // 2. Initialize Audio Context with iOS / WebKit fallback
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-      this.audioCtx = new AudioCtxClass({ sampleRate: 16000 });
+      if (!AudioCtxClass) {
+        throw new Error("AudioContext không được hỗ trợ trên thiết bị này.");
+      }
+
+      // Try 16kHz context first for zero-overhead streaming to Gemini
+      try {
+        this.audioCtx = new AudioCtxClass({ sampleRate: 16000 });
+      } catch (e) {
+        console.warn("[AudioRecorder] Could not create 16kHz AudioContext directly, falling back to default sampleRate:", e);
+        this.audioCtx = new AudioCtxClass();
+      }
+
+      // Ensure AudioContext is resumed on iOS Safari
+      if (this.audioCtx.state === "suspended") {
+        await this.audioCtx.resume();
+      }
 
       this.source = this.audioCtx.createMediaStreamSource(this.mediaStream);
 
-      // Buffer size of 4096 gives ~250ms chunks at 16kHz
-      this.processor = this.audioCtx.createScriptProcessor(4096, 1, 1);
+      // Buffer size of 4096 gives smooth audio frames
+      const bufferSize = 4096;
+      this.processor = this.audioCtx.createScriptProcessor(bufferSize, 1, 1);
+
+      const nativeSampleRate = this.audioCtx.sampleRate;
+      const targetSampleRate = 16000;
 
       this.processor.onaudioprocess = (e) => {
         if (!this.isRecording || !e.inputBuffer || e.inputBuffer.numberOfChannels === 0) return;
@@ -49,19 +76,27 @@ export class AudioRecorder {
         const inputData = e.inputBuffer.getChannelData(0);
         if (!inputData || inputData.length === 0) return;
 
-        // Calculate volume for visualizer (RMS)
+        // Calculate volume RMS for visualizer
         let sum = 0;
         for (let i = 0; i < inputData.length; i++) {
           sum += inputData[i] * inputData[i];
         }
         const rms = Math.sqrt(sum / inputData.length);
-        const normalizedVolume = Math.min(1, rms * 5); // scale for visibility
+        const normalizedVolume = Math.min(1, rms * 5); // Scale for UI visualizer
         if (this.onVolumeCallback) {
           this.onVolumeCallback(normalizedVolume);
         }
 
+        // Resample audio if native sample rate is not 16000 (common on iOS hardware running at 44.1kHz or 48kHz)
+        let resampledData: Float32Array;
+        if (nativeSampleRate !== targetSampleRate) {
+          resampledData = this.downsampleBuffer(inputData, nativeSampleRate, targetSampleRate);
+        } else {
+          resampledData = inputData;
+        }
+
         // Convert Float32Array to Int16 PCM ArrayBuffer
-        const pcm16 = this.floatTo16BitPCM(inputData);
+        const pcm16 = this.floatTo16BitPCM(resampledData);
         if (pcm16.length === 0) return;
 
         const base64 = this.arrayBufferToBase64(pcm16.buffer);
@@ -74,10 +109,22 @@ export class AudioRecorder {
       this.source.connect(this.processor);
       this.processor.connect(this.audioCtx.destination);
       this.isRecording = true;
-    } catch (err) {
-      console.error("[AudioRecorder] Could not access microphone:", err);
+    } catch (err: any) {
+      console.error("[AudioRecorder] Micro access error:", err);
       this.stop();
-      throw err;
+
+      // Format clean error for iOS / Android permissions guide
+      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        throw new Error("PERMISSION_DENIED: Bạn đã từ chối quyền Micro.");
+      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+        throw new Error("NO_MIC_FOUND: Không tìm thấy thiết bị Microphone trên máy.");
+      } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
+        throw new Error("MIC_IN_USE: Microphone đang được sử dụng bởi ứng dụng khác.");
+      } else if (err.name === "SecurityError") {
+        throw new Error("SECURITY_ERROR: Truy cập Micro yêu cầu kết nối bảo mật HTTPS.");
+      } else {
+        throw err;
+      }
     }
   }
 
@@ -101,7 +148,11 @@ export class AudioRecorder {
     }
 
     if (this.audioCtx) {
-      this.audioCtx.close();
+      try {
+        this.audioCtx.close();
+      } catch (e) {
+        console.warn("[AudioRecorder] Error closing AudioContext:", e);
+      }
       this.audioCtx = null;
     }
 
@@ -110,8 +161,41 @@ export class AudioRecorder {
     }
   }
 
-  public getIsRecording(): boolean {
+  public getIsRecording(): Boolean {
     return this.isRecording;
+  }
+
+  /**
+   * Resamples PCM float buffer from native sample rate (e.g. 44.1kHz / 48kHz on iOS) down to target 16kHz
+   */
+  private downsampleBuffer(
+    buffer: Float32Array,
+    sampleRate: number,
+    outSampleRate: number
+  ): Float32Array {
+    if (outSampleRate === sampleRate) return buffer;
+    if (outSampleRate > sampleRate) return buffer;
+
+    const sampleRateRatio = sampleRate / outSampleRate;
+    const newLength = Math.round(buffer.length / sampleRateRatio);
+    const result = new Float32Array(newLength);
+    let offsetResult = 0;
+    let offsetBuffer = 0;
+
+    while (offsetResult < result.length) {
+      const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+      let accum = 0;
+      let count = 0;
+      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+        accum += buffer[i];
+        count++;
+      }
+      result[offsetResult] = count > 0 ? accum / count : 0;
+      offsetResult++;
+      offsetBuffer = nextOffsetBuffer;
+    }
+
+    return result;
   }
 
   private floatTo16BitPCM(output: Float32Array): Int16Array {
@@ -133,3 +217,4 @@ export class AudioRecorder {
     return btoa(binary);
   }
 }
+

@@ -8,6 +8,7 @@ import { ModelSelectorModal } from "./components/ModelSelectorModal";
 import { ModelSelectorBar } from "./components/ModelSelectorBar";
 import { LatencyMetrics } from "./components/LatencyMetrics";
 import { RobotAssistantWidget } from "./components/RobotAssistantWidget";
+import { MicPermissionModal } from "./components/MicPermissionModal";
 import {
   ChatMessage,
   ConnectionState,
@@ -72,6 +73,8 @@ export default function App() {
 
   // Audio & Mic state
   const [isMicActive, setIsMicActive] = useState<boolean>(false);
+  const [isMicModalOpen, setIsMicModalOpen] = useState<boolean>(false);
+  const [micErrorMessage, setMicErrorMessage] = useState<string | null>(null);
   const [isAiMuted, setIsAiMuted] = useState<boolean>(false);
   const [userVolume, setUserVolume] = useState<number>(0);
   const [aiVolume, setAiVolume] = useState<number>(0);
@@ -237,6 +240,14 @@ export default function App() {
       try {
         const msg = JSON.parse(event.data);
 
+        if (msg.type === "ping") {
+          // Respond to server keep-alive ping
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "pong" }));
+          }
+          return;
+        }
+
         if (msg.type === "status" && msg.status === "connected") {
           setConnectionState("connected");
         } else if (msg.type === "audio") {
@@ -356,9 +367,11 @@ export default function App() {
       setIsMicActive(false);
       setUserVolume(0);
       setIsUserSpeaking(false);
+      setMicErrorMessage(null);
     } else {
       // Start recording
       try {
+        setMicErrorMessage(null);
         const recorder = new AudioRecorder(
           (base64Pcm) => {
             if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -393,8 +406,13 @@ export default function App() {
         await recorder.start();
         recorderRef.current = recorder;
         setIsMicActive(true);
-      } catch (err) {
-        alert("Không thể truy cập Microphone. Vui lòng cho phép quyền truy cập micro.");
+      } catch (err: any) {
+        console.error("[App] Microphone activation error:", err);
+        const cleanMsg =
+          err?.message ||
+          "Không thể truy cập Microphone. Vui lòng kiểm tra quyền truy cập trên Android/iOS.";
+        setMicErrorMessage(cleanMsg);
+        setIsMicModalOpen(true);
       }
     }
   };
@@ -541,6 +559,15 @@ export default function App() {
 
         {/* Right Status Actions */}
         <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+          <button
+            onClick={() => setIsMicModalOpen(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-cyan-950/80 hover:bg-cyan-900/80 border border-cyan-800/80 rounded-xl text-xs font-semibold text-cyan-300 transition-all shadow-sm"
+            title="Hướng dẫn cấp quyền Micro trên Android & iOS"
+          >
+            <Mic className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Quyền Micro</span>
+          </button>
+
           <button
             onClick={() => setIsSettingsOpen(true)}
             className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/80 rounded-xl text-xs font-semibold text-slate-200 transition-all shadow-sm"
@@ -970,6 +997,14 @@ export default function App() {
           }
         }}
         onOpenSettings={() => setIsSettingsOpen(true)}
+      />
+
+      {/* Microphone Access Guide & Diagnostic Modal */}
+      <MicPermissionModal
+        isOpen={isMicModalOpen}
+        onClose={() => setIsMicModalOpen(false)}
+        onRequestPermission={toggleMicrophone}
+        errorMessage={micErrorMessage}
       />
     </div>
   );

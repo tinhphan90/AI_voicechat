@@ -8,7 +8,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 function formatErrStr(err: any): string {
   if (!err) return "Unspecified error";
@@ -170,13 +170,20 @@ async function startServer() {
     let currentConfig: { voiceName?: string; systemInstruction?: string; modelName?: string } | null = null;
     let pendingConfig: { voiceName?: string; systemInstruction?: string; modelName?: string } | null = null;
 
+    // Heartbeat keep-alive to prevent Cloud Run / Nginx / browser idle timeouts
+    const pingInterval = setInterval(() => {
+      if (clientWs.readyState === WebSocket.OPEN) {
+        sendToClient({ type: "ping" });
+      }
+    }, 15000);
+
     const initLiveSession = async (configOverride?: {
       voiceName?: string;
       systemInstruction?: string;
       modelName?: string;
     }) => {
       const voiceName = configOverride?.voiceName || "Zephyr";
-      const modelName = configOverride?.modelName || "gemini-3.1-flash-live-preview";
+      let modelName = configOverride?.modelName || "gemini-3.1-flash-live-preview";
       const systemInstruction = configOverride?.systemInstruction ||
         "Bạn là một trợ lý AI thông minh, thân thiện, phản hồi trò chuyện bằng tiếng Việt hoặc ngôn ngữ người dùng sử dụng. Hãy giữ câu trả lời tự nhiên, ngắn gọn và mạch lạc như trò chuyện thoại thực tế.";
 
@@ -214,67 +221,81 @@ async function startServer() {
 
         console.log(`[LiveAPI] Connecting model ${modelName} with voice ${voiceName}...`);
 
-        liveSession = await ai.live.connect({
-          model: modelName,
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName }
-              }
+        const createLiveSession = async (targetModel: string) => {
+          return await ai.live.connect({
+            model: targetModel,
+            config: {
+              responseModalities: [Modality.AUDIO],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName }
+                }
+              },
+              systemInstruction
             },
-            systemInstruction
-          },
-          callbacks: {
-            onmessage: (message: LiveServerMessage) => {
-              // 1. Check for model audio output
-              const parts = message.serverContent?.modelTurn?.parts;
-              if (parts && parts.length > 0) {
-                for (const part of parts) {
-                  if (part.inlineData?.data) {
-                    sendToClient({
-                      type: "audio",
-                      data: part.inlineData.data,
-                      mimeType: part.inlineData.mimeType || "audio/pcm;rate=24000"
-                    });
-                  }
-                  if (part.text) {
-                    sendToClient({
-                      type: "text_delta",
-                      text: part.text,
-                      role: "model"
-                    });
+            callbacks: {
+              onmessage: (message: LiveServerMessage) => {
+                // 1. Check for model audio output
+                const parts = message.serverContent?.modelTurn?.parts;
+                if (parts && parts.length > 0) {
+                  for (const part of parts) {
+                    if (part.inlineData?.data) {
+                      sendToClient({
+                        type: "audio",
+                        data: part.inlineData.data,
+                        mimeType: part.inlineData.mimeType || "audio/pcm;rate=24000"
+                      });
+                    }
+                    if (part.text) {
+                      sendToClient({
+                        type: "text_delta",
+                        text: part.text,
+                        role: "model"
+                      });
+                    }
                   }
                 }
-              }
 
-              // 2. Check for interruption signal
-              if (message.serverContent?.interrupted) {
-                sendToClient({ type: "interrupted" });
-              }
+                // 2. Check for interruption signal
+                if (message.serverContent?.interrupted) {
+                  sendToClient({ type: "interrupted" });
+                }
 
-              // 3. Check for turn completion
-              if (message.serverContent?.turnComplete) {
-                sendToClient({ type: "turn_complete" });
+                // 3. Check for turn completion
+                if (message.serverContent?.turnComplete) {
+                  sendToClient({ type: "turn_complete" });
+                }
+              },
+              onerror: (err: any) => {
+                const errMsg = formatErrStr(err);
+                console.warn("[LiveAPI] Session notice/error:", errMsg);
+                sendToClient({
+                  type: "error",
+                  error: errMsg
+                });
+              },
+              onclose: (event: any) => {
+                const code = event?.code || event?.status || "";
+                const reason = event?.reason || "";
+                console.log(`[LiveAPI] Session closed ${code} ${reason}`.trim());
+                isConnectedToLive = false;
+                sendToClient({ type: "session_closed" });
               }
-            },
-            onerror: (err: any) => {
-              const errMsg = formatErrStr(err);
-              console.warn("[LiveAPI] Session notice/error:", errMsg);
-              sendToClient({
-                type: "error",
-                error: errMsg
-              });
-            },
-            onclose: (event: any) => {
-              const code = event?.code || event?.status || "";
-              const reason = event?.reason || "";
-              console.log(`[LiveAPI] Session closed ${code} ${reason}`.trim());
-              isConnectedToLive = false;
-              sendToClient({ type: "session_closed" });
             }
+          });
+        };
+
+        try {
+          liveSession = await createLiveSession(modelName);
+        } catch (firstErr: any) {
+          if (modelName !== "gemini-2.0-flash-exp") {
+            console.warn(`[LiveAPI] Model ${modelName} connect failed, trying fallback gemini-2.0-flash-exp:`, firstErr?.message);
+            modelName = "gemini-2.0-flash-exp";
+            liveSession = await createLiveSession(modelName);
+          } else {
+            throw firstErr;
           }
-        });
+        }
 
         isConnectedToLive = true;
         currentConfig = { voiceName, systemInstruction, modelName };
@@ -402,6 +423,9 @@ async function startServer() {
               error: `Lỗi xử lý tệp/hình ảnh: ${errMsg}`
             });
           }
+        } else if (msg.type === "pong") {
+          // Client keep-alive pong received
+          return;
         } else if (msg.type === "interrupt") {
           // Handle client-requested interrupt
           sendToClient({ type: "interrupted" });
@@ -413,6 +437,7 @@ async function startServer() {
 
     clientWs.on("close", () => {
       console.log("[WebSocket] Client disconnected");
+      clearInterval(pingInterval);
       if (liveSession) {
         try {
           liveSession.close();

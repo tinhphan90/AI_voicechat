@@ -58,7 +58,9 @@ export class AudioPlayer {
 
       const currentTime = ctx.currentTime;
       if (this.nextStartTime < currentTime) {
-        this.nextStartTime = currentTime;
+        // Add a 60ms jitter buffer cushion when starting a new chunk sequence
+        // This prevents buffer underrun stutters on mobile WiFi/Cellular connections
+        this.nextStartTime = currentTime + 0.06;
       }
 
       source.start(this.nextStartTime);
