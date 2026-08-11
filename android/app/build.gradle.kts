@@ -22,15 +22,15 @@ android {
 
     buildTypes {
         debug {
-            buildConfigField("String", "SERVER_URL", "\"wss://ai-voicechat-y6xp.onrender.com/ws\"")
-            buildConfigField("String", "DEV_SERVER_URL", "\"wss://ai-voicechat-y6xp.onrender.com/ws\"")
-            buildConfigField("String", "PRODUCTION_SERVER_URL", "\"wss://ai-voicechat-y6xp.onrender.com/ws\"")
+            buildConfigField("String", "SERVER_URL", "\"wss://ais-dev-5xajsiegcuhelan7xhiauy-405599943963.asia-southeast1.run.app/ws\"")
+            buildConfigField("String", "DEV_SERVER_URL", "\"wss://ais-dev-5xajsiegcuhelan7xhiauy-405599943963.asia-southeast1.run.app/ws\"")
+            buildConfigField("String", "PRODUCTION_SERVER_URL", "\"wss://ais-pre-5xajsiegcuhelan7xhiauy-405599943963.asia-southeast1.run.app/ws\"")
         }
         release {
             isMinifyEnabled = false
-            buildConfigField("String", "SERVER_URL", "\"wss://ai-voicechat-y6xp.onrender.com/ws\"")
-            buildConfigField("String", "DEV_SERVER_URL", "\"wss://ai-voicechat-y6xp.onrender.com/ws\"")
-            buildConfigField("String", "PRODUCTION_SERVER_URL", "\"wss://ai-voicechat-y6xp.onrender.com/ws\"")
+            buildConfigField("String", "SERVER_URL", "\"wss://ais-pre-5xajsiegcuhelan7xhiauy-405599943963.asia-southeast1.run.app/ws\"")
+            buildConfigField("String", "DEV_SERVER_URL", "\"wss://ais-dev-5xajsiegcuhelan7xhiauy-405599943963.asia-southeast1.run.app/ws\"")
+            buildConfigField("String", "PRODUCTION_SERVER_URL", "\"wss://ais-pre-5xajsiegcuhelan7xhiauy-405599943963.asia-southeast1.run.app/ws\"")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

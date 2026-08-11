@@ -11,11 +11,11 @@ export class AudioRecorder {
   private source: MediaStreamAudioSourceNode | null = null;
   private isRecording = false;
 
-  private onAudioChunkCallback: ((base64Pcm: string) => void) | null = null;
+  private onAudioChunkCallback: ((base64Pcm: string, volume: number) => void) | null = null;
   private onVolumeCallback: ((volume: number) => void) | null = null;
 
   constructor(
-    onAudioChunk: (base64Pcm: string) => void,
+    onAudioChunk: (base64Pcm: string, volume: number) => void,
     onVolume?: (volume: number) => void
   ) {
     this.onAudioChunkCallback = onAudioChunk;
@@ -102,7 +102,7 @@ export class AudioRecorder {
         const base64 = this.arrayBufferToBase64(pcm16.buffer);
 
         if (this.onAudioChunkCallback) {
-          this.onAudioChunkCallback(base64);
+          this.onAudioChunkCallback(base64, normalizedVolume);
         }
       };
 

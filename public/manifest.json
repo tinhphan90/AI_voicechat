@@ -4,14 +4,8 @@
   "description": "Ứng dụng trò chuyện 2 chiều thời gian thực với AI qua WebSockets và Gemini Live API.",
   "icons": [
     {
-      "src": "/icon-192.png",
-      "type": "image/png",
-      "sizes": "192x192",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/icon-512.png",
-      "type": "image/png",
+      "src": "/src/assets/images/app_icon_1786363286215.jpg",
+      "type": "image/jpeg",
       "sizes": "512x512",
       "purpose": "any maskable"
     }
