@@ -32,15 +32,22 @@ export class AudioRecorder {
     }
 
     try {
-      // 1. Request microphone stream with echo cancellation and noise suppression
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      // 1. Request microphone stream with echo cancellation and noise suppression (with iOS fallback)
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      } catch (firstErr: any) {
+        console.warn("[AudioRecorder] Detailed audio constraints failed on iOS, retrying with basic { audio: true }:", firstErr);
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+      this.mediaStream = stream;
 
       // 2. Initialize Audio Context with iOS / WebKit fallback
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -107,7 +114,13 @@ export class AudioRecorder {
       };
 
       this.source.connect(this.processor);
-      this.processor.connect(this.audioCtx.destination);
+      
+      // On iOS Safari, route processor through a silent gain node to prevent mic loopback into device speaker
+      const muteGain = this.audioCtx.createGain();
+      muteGain.gain.value = 0;
+      this.processor.connect(muteGain);
+      muteGain.connect(this.audioCtx.destination);
+
       this.isRecording = true;
     } catch (err: any) {
       console.error("[AudioRecorder] Micro access error:", err);

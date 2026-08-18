@@ -433,6 +433,9 @@ export default function App() {
 
   // 4. Toggle Microphone (Start/Stop AudioRecorder)
   const toggleMicrophone = async () => {
+    // Unlock iOS Safari Web Audio on direct user gesture
+    playerRef.current?.unlockAudio();
+
     if (isMicActive) {
       // Stop recording
       recorderRef.current?.stop();

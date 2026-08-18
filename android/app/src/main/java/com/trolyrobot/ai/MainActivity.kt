@@ -144,9 +144,22 @@ fun MainScreen(viewModel: MainViewModel) {
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
+            Toast.makeText(context, "Đã cấp quyền Microphone thành công!", Toast.LENGTH_SHORT).show()
             viewModel.startMicrophone()
         } else {
             showMicPermissionDeniedDialog = true
+        }
+    }
+
+    // Auto-request Microphone permission on App Startup if not granted yet
+    LaunchedEffect(Unit) {
+        val hasMicPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasMicPermission) {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -368,7 +381,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     onDismissRequest = { showMicPermissionDeniedDialog = false },
                     title = { Text("Quyền truy cập Microphone") },
                     text = {
-                        Text("Ứng dụng cần quyền Microphone để thu âm và trò chuyện trực tiếp 2 chiều với AI Gemini. Vui lòng cho phép quyền Micro trong Cài đặt hệ thống Android.")
+                        Text("Ứng dụng cần quyền Microphone để thu âm giọng nói và trò chuyện 2 chiều với Trợ lý AI. Vui lòng nhấn 'Cấp quyền' hoặc 'Mở Cài đặt' để cho phép ứng dụng sử dụng Micro.")
                     },
                     confirmButton = {
                         TextButton(
@@ -377,6 +390,7 @@ fun MainScreen(viewModel: MainViewModel) {
                                 try {
                                     val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                         data = Uri.fromParts("package", context.packageName, null)
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                     }
                                     context.startActivity(intent)
                                 } catch (e: Exception) {
@@ -388,8 +402,13 @@ fun MainScreen(viewModel: MainViewModel) {
                         }
                     },
                     dismissButton = {
-                        TextButton(onClick = { showMicPermissionDeniedDialog = false }) {
-                            Text("Đóng")
+                        TextButton(
+                            onClick = {
+                                showMicPermissionDeniedDialog = false
+                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        ) {
+                            Text("Cấp quyền lại")
                         }
                     }
                 )

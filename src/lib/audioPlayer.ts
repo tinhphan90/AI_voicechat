@@ -21,16 +21,35 @@ export class AudioPlayer {
   private initAudioContext(): AudioContext {
     if (!this.audioCtx) {
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
-      this.audioCtx = new AudioCtxClass({ sampleRate: 24000 });
+      if (!AudioCtxClass) {
+        throw new Error("Trình duyệt không hỗ trợ Web Audio API.");
+      }
+      try {
+        this.audioCtx = new AudioCtxClass({ sampleRate: 24000 });
+      } catch (e) {
+        console.warn("[AudioPlayer] Cannot instantiate 24kHz AudioContext directly (iOS fallback):", e);
+        this.audioCtx = new AudioCtxClass();
+      }
       this.analyser = this.audioCtx.createAnalyser();
       this.analyser.fftSize = 256;
       this.analyser.connect(this.audioCtx.destination);
       this.startVolumeMonitoring();
     }
     if (this.audioCtx.state === "suspended") {
-      this.audioCtx.resume();
+      this.audioCtx.resume().catch((e) => console.warn("[AudioPlayer] resume audio context notice:", e));
     }
     return this.audioCtx;
+  }
+
+  public unlockAudio(): void {
+    try {
+      const ctx = this.initAudioContext();
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   public playChunk(base64Pcm: string): void {
